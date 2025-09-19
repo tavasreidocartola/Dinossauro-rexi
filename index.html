@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Runner do Dino — com poderes e Copilot</title>
+  <title>Dino Runner com poderes</title>
   <style>
     body { margin:0; background:#f7f7f7; font-family:sans-serif; }
     .wrap { max-width:900px; margin:0 auto; padding:16px; }
@@ -43,9 +43,13 @@
   window.addEventListener("keydown",e=>{if(gameOver&&e.key==="Enter"){restart();return;}if([" ","ArrowUp","w","W"].includes(e.key)){e.preventDefault();jump();}});
   canvas.addEventListener("pointerdown",()=>{if(gameOver)restart();else jump();});
 
-  function spawnObstacle(){obstacles.push({x:W+10,y:groundY-40,w:20,h:40,type:"cactus"});}
+  function spawnObstacle(){obstacles.push({x:W+10,y:groundY-40,w:20,h:40});}
   function spawnCloud(){clouds.push({x:W+20,y:rand(40,120),w:60,h:20,speed:rand(0.6,1.1)});}
-  function spawnPowerup(){const r=Math.random();let type;if(r<0.25)type="white";else if(r<0.5)type="red";else if(r<0.75)type="blue";else type="copilot";powerups.push({x:W+20,y:rand(groundY-100,groundY-40),r:12,type});}
+  function spawnPowerup(){
+    const r=Math.random();let type;
+    if(r<0.25)type="white";else if(r<0.5)type="red";else if(r<0.75)type="blue";else type="copilot";
+    powerups.push({x:W+20,y:rand(groundY-100,groundY-40),r:12,type});
+  }
 
   function activatePower(type){power.type=type;power.time=(type==="copilot"?5:4);if(type==="blue")player.fly=true;if(type==="copilot")speed*=0.7;updateBadge();}
   function clearPower(){power.type=null;power.time=0;player.fly=false;updateBadge();}
@@ -83,7 +87,7 @@
   function draw(){
     ctx.clearRect(0,0,W,H);
     ctx.fillStyle="#ddd";ctx.fillRect(0,groundY,W,H-groundY);
-    for(const c of clouds){ctx.fillStyle="#ccc";ctx.fillRect(c.x,c.y,c.w,c.h);}
+    ctx.fillStyle="#ccc";for(const c of clouds)ctx.fillRect(c.x,c.y,c.w,c.h);
     for(const p of powerups){ctx.fillStyle=(p.type==="white"?"#fff":p.type==="red"?"#f00":p.type==="blue"?"#00f":"#0f0");ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}
     ctx.fillStyle="#070";for(const o of obstacles)ctx.fillRect(o.x,o.y,o.w,o.h);
     ctx.fillStyle=(power.type==="white"?"rgba(0,0,0,0.3)":"#000");ctx.fillRect(player.x,player.y,player.w,player.h);
@@ -91,4 +95,4 @@
   }
 
   function endGame(){gameOver=true;running=false;if(score>best){best=score;localStorage.setItem("runner_best",best);bestEl.textContent=best;}}
-  function restart(){obstacles.length=0;clouds.length=0;powerups.length=0;player.y=groundY-40;player.vy=0;player.on
+  function restart(){obstacles.length=0;clouds.length=0;powerups.length=0;player.y=groundY-40;player.vy=0;player.onGround=true;player.fly=false;
