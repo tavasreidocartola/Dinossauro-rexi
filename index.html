@@ -5,142 +5,90 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Runner do Dino — com poderes e Copilot</title>
   <style>
-    :root {
-      --bg: #f7f7f7;
-      --fg: #222;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: system-ui, sans-serif;
-    }
-    .wrap { max-width: 920px; margin: 0 auto; padding: 16px; }
-    h1 { font-size: 20px; margin: 8px 0 12px; }
-    .hud {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 8px; font-size: 14px;
-    }
-    .hudRight { display: flex; align-items: center; gap: 8px; }
-    .badge {
-      border: 1px solid #999; background: #fff; padding: 4px 8px;
-      border-radius: 999px; font-weight: 700; min-width: 120px; text-align: center;
-    }
-    .btn {
-      border: 1px solid #999; background: #fff; padding: 6px 10px;
-      border-radius: 8px; cursor: pointer; font-weight: 600;
-    }
-    canvas {
-      width: 100%; height: auto; display: block;
-      background: linear-gradient(#ffffff, #f3f3f3);
-      border: 2px solid #e5e5e5; border-radius: 16px;
-    }
+    body { margin:0; background:#f7f7f7; font-family:sans-serif; }
+    .wrap { max-width:900px; margin:0 auto; padding:16px; }
+    canvas { width:100%; border:2px solid #ccc; border-radius:12px; background:#fff; }
+    .hud { display:flex; justify-content:space-between; margin-bottom:8px; }
+    .badge { padding:4px 8px; border:1px solid #999; border-radius:12px; min-width:120px; text-align:center; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Runner do Dino — com poderes e Copilot</h1>
-    <div class="hud">
-      <div>
-        Velocidade: <span id="speed">0</span> | Pontos: <span id="score">0</span> | Recorde: <span id="best">0</span>
-      </div>
-      <div class="hudRight">
-        <div id="powerBadge" class="badge">Sem poder</div>
-        <button id="pauseBtn" class="btn">Pausar</button>
-        <button id="restartBtn" class="btn">Reiniciar</button>
-      </div>
-    </div>
-    <canvas id="game" width="900" height="300"></canvas>
+<div class="wrap">
+  <div class="hud">
+    <div>Velocidade: <span id="speed">0</span> | Pontos: <span id="score">0</span> | Recorde: <span id="best">0</span></div>
+    <div class="badge" id="powerBadge">Sem poder</div>
   </div>
+  <canvas id="game" width="900" height="300"></canvas>
+</div>
 
 <script>
 (() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height, groundY = H - 40;
+  const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+  const W=canvas.width,H=canvas.height,groundY=H-40;
+  const speedEl=document.getElementById("speed"),scoreEl=document.getElementById("score"),bestEl=document.getElementById("best"),powerBadge=document.getElementById("powerBadge");
 
-  const speedEl = document.getElementById('speed');
-  const scoreEl = document.getElementById('score');
-  const bestEl = document.getElementById('best');
-  const pauseBtn = document.getElementById('pauseBtn');
-  const restartBtn = document.getElementById('restartBtn');
-  const powerBadge = document.getElementById('powerBadge');
-
-  const player = { x:80, y:groundY-40, w:36, h:40, vy:0, onGround:true, fly:false };
-  const gravity=0.8, jumpVel=-13.5, maxFall=20;
-  const obstacles=[], clouds=[], powerups=[];
-  let baseSpeed=6, speed=baseSpeed, time=0, score=0;
-  let best=Number(localStorage.getItem('runner_best')||0); bestEl.textContent=best;
+  const player={x:80,y:groundY-40,w:36,h:40,vy:0,onGround:true,fly:false};
+  const gravity=0.8,jumpVel=-13.5,maxFall=20;
+  const obstacles=[],clouds=[],powerups=[];
+  let baseSpeed=6,speed=baseSpeed,time=0,score=0;
+  let best=Number(localStorage.getItem("runner_best")||0);bestEl.textContent=best;
   const power={type:null,time:0};
-  let running=true, gameOver=false, lastTs=0;
-  let spawnCooldown=0, cloudCooldown=0, powerCooldown=2;
+  let running=true,gameOver=false,lastTs=0;
+  let spawnCooldown=0,cloudCooldown=0,powerCooldown=2;
 
   function rand(a,b){return Math.random()*(b-a)+a;}
   function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
 
-  function jump(){ if(!running||gameOver) return;
-    if(player.fly) return;
-    if(player.onGround){ player.vy=jumpVel; player.onGround=false; }
-  }
+  function jump(){if(!running||gameOver)return;if(player.fly)return;if(player.onGround){player.vy=jumpVel;player.onGround=false;}}
+  window.addEventListener("keydown",e=>{if(gameOver&&e.key==="Enter"){restart();return;}if([" ","ArrowUp","w","W"].includes(e.key)){e.preventDefault();jump();}});
+  canvas.addEventListener("pointerdown",()=>{if(gameOver)restart();else jump();});
 
-  window.addEventListener('keydown',e=>{
-    if(gameOver && e.key==='Enter'){restart();return;}
-    if([' ','ArrowUp','w','W'].includes(e.key)){e.preventDefault();jump();}
-  });
-  canvas.addEventListener('pointerdown',()=>{ if(gameOver) restart(); else jump(); });
+  function spawnObstacle(){obstacles.push({x:W+10,y:groundY-40,w:20,h:40,type:"cactus"});}
+  function spawnCloud(){clouds.push({x:W+20,y:rand(40,120),w:60,h:20,speed:rand(0.6,1.1)});}
+  function spawnPowerup(){const r=Math.random();let type;if(r<0.25)type="white";else if(r<0.5)type="red";else if(r<0.75)type="blue";else type="copilot";powerups.push({x:W+20,y:rand(groundY-100,groundY-40),r:12,type});}
 
-  pauseBtn.onclick=()=>{ running=!running; pauseBtn.textContent=running?'Pausar':'Continuar'; if(running){lastTs=performance.now();requestAnimationFrame(loop);} };
-  restartBtn.onclick=restart;
-
-  function spawnObstacle(){
-    const type=Math.random();
-    if(type<0.6){ obstacles.push({x:W+10,y:groundY-40,w:20,h:40,type:'cactus'}); }
-    else { obstacles.push({x:W+10,y:groundY-90,w:28,h:18,type:'bird',flap:0}); }
-  }
-  function spawnCloud(){ clouds.push({x:W+20,y:rand(40,120),w:60,h:20,speed:rand(0.6,1.1)}); }
-  function spawnPowerup(){
-    const r=Math.random(); let type;
-    if(r<0.25) type='white'; else if(r<0.5) type='red'; else if(r<0.75) type='blue'; else type='copilot';
-    powerups.push({x:W+20,y:rand(groundY-100,groundY-40),r:12,type});
-  }
-
-  function activatePower(type){
-    power.type=type; power.time=4;
-    if(type==='blue') player.fly=true;
-    if(type==='copilot'){ power.time=5; speed*=0.7; }
-    updateBadge();
-  }
-  function clearPower(){ power.type=null; power.time=0; player.fly=false; updateBadge(); }
-  function updateBadge(){
-    if(!power.type){ powerBadge.textContent='Sem poder'; return; }
-    const secs=power.time.toFixed(1);
-    const name={white:'Branco',red:'Vermelho',blue:'Azul',copilot:'Copilot'}[power.type];
-    powerBadge.textContent=`${name}: ${secs}s`;
-  }
+  function activatePower(type){power.type=type;power.time=(type==="copilot"?5:4);if(type==="blue")player.fly=true;if(type==="copilot")speed*=0.7;updateBadge();}
+  function clearPower(){power.type=null;power.time=0;player.fly=false;updateBadge();}
+  function updateBadge(){if(!power.type){powerBadge.textContent="Sem poder";return;}powerBadge.textContent=`${power.type} ${power.time.toFixed(1)}s`; }
 
   function update(dt){
-    if(!running||gameOver) return;
-    time+=dt; speed+=((baseSpeed+Math.min(8,time*0.35))-speed)*0.02;
-    if(player.fly){ player.y+=(groundY-140-player.y)*0.2; player.vy=0; }
-    else{ player.vy=Math.min(player.vy+gravity,maxFall); player.y+=player.vy;
-      if(player.y+player.h>=groundY){player.y=groundY-player.h;player.vy=0;player.onGround=true;} }
-    for(const o of obstacles){o.x-=speed;if(o.type==='bird')o.flap=(o.flap+dt*6)%6.28;}
-    for(let i=obstacles.length-1;i>=0;i--) if(obstacles[i].x+obstacles[i].w<-20) obstacles.splice(i,1);
+    if(!running||gameOver)return;
+    time+=dt;speed+=((baseSpeed+Math.min(8,time*0.35))-speed)*0.02;
+    if(player.fly){player.y+=(groundY-140-player.y)*0.2;player.vy=0;}
+    else{player.vy=Math.min(player.vy+gravity,maxFall);player.y+=player.vy;if(player.y+player.h>=groundY){player.y=groundY-player.h;player.vy=0;player.onGround=true;}}
+    for(const o of obstacles)o.x-=speed;
+    for(let i=obstacles.length-1;i>=0;i--)if(obstacles[i].x+obstacles[i].w<-20)obstacles.splice(i,1);
     for(const c of clouds)c.x-=c.speed;
-    for(let i=clouds.length-1;i>=0;i--) if(clouds[i].x+clouds[i].w<-10) clouds.splice(i,1);
+    for(let i=clouds.length-1;i>=0;i--)if(clouds[i].x+clouds[i].w<-10)clouds.splice(i,1);
     for(const p of powerups)p.x-=speed*0.95;
-    for(let i=powerups.length-1;i>=0;i--) if(powerups[i].x+powerups[i].r<-20) powerups.splice(i,1);
-    spawnCooldown-=dt; if(spawnCooldown<=0){spawnObstacle();spawnCooldown=rand(0.8,1.2);}
-    cloudCooldown-=dt; if(cloudCooldown<=0){spawnCloud();cloudCooldown=rand(1.5,2.5);}
-    powerCooldown-=dt; if(powerCooldown<=0){spawnPowerup();powerCooldown=rand(2,4);}
+    for(let i=powerups.length-1;i>=0;i--)if(powerups[i].x+powerups[i].r<-20)powerups.splice(i,1);
+    spawnCooldown-=dt;if(spawnCooldown<=0){spawnObstacle();spawnCooldown=rand(0.8,1.2);}
+    cloudCooldown-=dt;if(cloudCooldown<=0){spawnCloud();cloudCooldown=rand(1.5,2.5);}
+    powerCooldown-=dt;if(powerCooldown<=0){spawnPowerup();powerCooldown=rand(2,4);}
     for(let i=powerups.length-1;i>=0;i--){const p=powerups[i];if(circleRectOverlap(p.x,p.y,p.r,player)){activatePower(p.type);powerups.splice(i,1);}}
     if(power.type){power.time-=dt;if(power.time<=0)clearPower();else updateBadge();}
-    score+=speed*dt*10; scoreEl.textContent=Math.floor(score); speedEl.textContent=speed.toFixed(1);
+    score+=speed*dt*10;scoreEl.textContent=Math.floor(score);speedEl.textContent=speed.toFixed(1);
     handleCollisions();
   }
 
   function handleCollisions(){
-    if(power.type==='white'||power.type==='blue'||power.type==='copilot') return;
-    if(power.type==='red'){ for(let i=obstacles.length-1;i>=0;i--) if(rectsOverlap(player,obstacles[i])) obstacles.splice(i,1); return; }
-    for(const o
+    if(["white","blue","copilot"].includes(power.type))return;
+    if(power.type==="red"){for(let i=obstacles.length-1;i>=0;i--)if(rectsOverlap(player,obstacles[i]))obstacles.splice(i,1);return;}
+    for(const o of obstacles)if(rectsOverlap(player,o))endGame();
+  }
+
+  function rectsOverlap(a,b){return a.x<a.x+a.w&&a.x+b.w>a.x&&a.y<a.y+a.h&&a.y+b.h>a.y;}
+  function circleRectOverlap(cx,cy,r,rect){const closestX=clamp(cx,rect.x,rect.x+rect.w);const closestY=clamp(cy,rect.y,rect.y+rect.h);const dx=cx-closestX,dy=cy-closestY;return dx*dx+dy*dy<=r*r;}
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle="#ddd";ctx.fillRect(0,groundY,W,H-groundY);
+    for(const c of clouds){ctx.fillStyle="#ccc";ctx.fillRect(c.x,c.y,c.w,c.h);}
+    for(const p of powerups){ctx.fillStyle=(p.type==="white"?"#fff":p.type==="red"?"#f00":p.type==="blue"?"#00f":"#0f0");ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}
+    ctx.fillStyle="#070";for(const o of obstacles)ctx.fillRect(o.x,o.y,o.w,o.h);
+    ctx.fillStyle=(power.type==="white"?"rgba(0,0,0,0.3)":"#000");ctx.fillRect(player.x,player.y,player.w,player.h);
+    if(gameOver){ctx.fillStyle="rgba(255,255,255,0.8)";ctx.fillRect(W/2-100,H/2-40,200,80);ctx.fillStyle="#000";ctx.fillText("GAME OVER",W/2-40,H/2);}
+  }
+
+  function endGame(){gameOver=true;running=false;if(score>best){best=score;localStorage.setItem("runner_best",best);bestEl.textContent=best;}}
+  function restart(){obstacles.length=0;clouds.length=0;powerups.length=0;player.y=groundY-40;player.vy=0;player.on
