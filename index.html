@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Runner do Dino — estilo Chrome</title>
+  <title>Runner do Dino — com poderes</title>
   <style>
     :root {
       --bg: #f7f7f7;
@@ -11,6 +11,7 @@
       --ground: #333;
       --accent: #0a84ff;
       --danger: #e53935;
+      --ok: #2e7d32;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -38,6 +39,20 @@
       gap: 12px;
       margin-bottom: 8px;
       font-size: 14px;
+    }
+    .hudRight {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      border: 1px solid #999;
+      background: #fff;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      min-width: 120px;
+      text-align: center;
     }
     .btn {
       appearance: none;
@@ -75,21 +90,22 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Runner do Dino — estilo Chrome</h1>
+    <h1>Runner do Dino — com poderes</h1>
     <div class="hud">
       <div>
         Velocidade: <span id="speed">0</span> | Pontos: <span id="score">0</span> | Recorde: <span id="best">0</span>
       </div>
-      <div>
+      <div class="hudRight">
+        <div id="powerBadge" class="badge">Sem poder</div>
         <button id="pauseBtn" class="btn" aria-pressed="false">Pausar</button>
         <button id="restartBtn" class="btn">Reiniciar</button>
       </div>
     </div>
     <div class="panel">
-      Teclado: Espaço/W/↑ para pular. Enter para reiniciar após Game Over. Toque: toque para pular/reiniciar.
+      Teclado: Espaço/W/↑ para pular. Enter para reiniciar após Game Over. Toque: toque para pular/coletar e para reiniciar.
     </div>
     <canvas id="game" width="900" height="300" aria-label="Jogo runner"></canvas>
-    <div class="touchHint">Dica: em celulares, toque no quadro para pular.</div>
+    <div class="touchHint">Dica: pegue os orbes coloridos para ativar poderes por 4s.</div>
   </div>
 
   <script>
@@ -103,13 +119,14 @@
       const bestEl = document.getElementById('best');
       const pauseBtn = document.getElementById('pauseBtn');
       const restartBtn = document.getElementById('restartBtn');
+      const powerBadge = document.getElementById('powerBadge');
 
       // Mundo
       const W = canvas.width;
       const H = canvas.height;
       const groundY = H - 40;
 
-      // Jogador (dino/boneco)
+      // Jogador
       const player = {
         x: 80,
         y: groundY - 40,
@@ -117,6 +134,7 @@
         h: 40,
         vy: 0,
         onGround: true,
+        fly: false,
         color: '#222'
       };
 
@@ -125,17 +143,21 @@
       const jumpVel = -13.5;
       const maxFall = 20;
 
-      // Obstáculos
+      // Entidades
       const obstacles = [];
       const clouds = [];
+      const powerups = [];
 
       // Dificuldade e progresso
-      let baseSpeed = 6;                // velocidade inicial
-      let speed = baseSpeed;            // velocidade atual (px/frame)
-      let time = 0;                     // tempo em segundos
+      let baseSpeed = 6;
+      let speed = baseSpeed;
+      let time = 0;
       let score = 0;
       let best = Number(localStorage.getItem('runner_best') || 0);
       bestEl.textContent = best;
+
+      // Poder
+      const power = { type: null, time: 0 }; // types: 'white' | 'red' | 'blue'
 
       // Estado do jogo
       let running = true;
@@ -143,9 +165,11 @@
       let lastTs = 0;
       let spawnCooldown = 0;
       let cloudCooldown = 0;
+      let powerCooldown = 2.5; // primeiro powerup aparece rapidinho
 
-      // Util
+      // Utils
       function rand(min, max) { return Math.random() * (max - min) + min; }
+      function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
       // Input
       const jumpKeys = new Set([' ', 'Spacebar', 'Space', 'ArrowUp', 'Up', 'w', 'W']);
@@ -172,37 +196,33 @@
         if (running) {
           lastTs = performance.now();
           requestAnimationFrame(loop);
-        } else {
-          // nada
         }
       });
       restartBtn.addEventListener('click', restart);
 
       function jump() {
         if (!running || gameOver) return;
+        if (player.fly) return; // no modo voo, ignorar pulo
         if (player.onGround) {
           player.vy = jumpVel;
           player.onGround = false;
         }
       }
 
+      // Spawns
       function spawnObstacle() {
-        // Três tipos simples: baixo, duplo baixo, alto (pássaro)
         const type = Math.random();
         if (type < 0.6) {
-          // cacto baixo
           const w = rand(18, 26);
           const h = rand(36, 52);
           obstacles.push({ x: W + 10, y: groundY - h, w, h, type: 'cactus' });
         } else if (type < 0.85) {
-          // duplo cacto
           const gap = 18;
           const h1 = rand(28, 40);
           const h2 = rand(34, 52);
           obstacles.push({ x: W + 10, y: groundY - h1, w: 18, h: h1, type: 'cactus' });
           obstacles.push({ x: W + 10 + 18 + gap, y: groundY - h2, w: 18, h: h2, type: 'cactus' });
         } else {
-          // pássaro (no ar)
           const h = 18;
           const w = 28;
           const levels = [groundY - 90, groundY - 120];
@@ -221,50 +241,118 @@
         });
       }
 
+      function spawnPowerup() {
+        // Escolhe tipo com probabilidades equilibradas
+        const r = Math.random();
+        const type = r < 0.34 ? 'white' : r < 0.67 ? 'red' : 'blue';
+        // Altura: branca e vermelha perto do chão; azul pode flutuar mais alto
+        const baseY = type === 'blue' ? rand(groundY - 120, groundY - 70) : rand(groundY - 40, groundY - 20);
+        powerups.push({
+          x: W + 20,
+          y: baseY,
+          r: 12,
+          type,
+          vx: speed * 0.95
+        });
+      }
+
+      // Poder
+      function activatePower(type) {
+        power.type = type;
+        power.time = 4.0;
+        if (type === 'blue') {
+          player.fly = true;
+        }
+        updateBadge();
+      }
+
+      function clearPower() {
+        power.type = null;
+        power.time = 0;
+        player.fly = false;
+        updateBadge();
+      }
+
+      function updateBadge() {
+        if (!power.type) {
+          powerBadge.textContent = 'Sem poder';
+          powerBadge.style.borderColor = '#999';
+          powerBadge.style.color = '#222';
+          powerBadge.style.background = '#fff';
+          return;
+        }
+        const secs = Math.max(0, power.time).toFixed(1);
+        const name = power.type === 'white' ? 'Branco' : power.type === 'red' ? 'Vermelho' : 'Azul';
+        powerBadge.textContent = `Poder: ${name} ${secs}s`;
+        if (power.type === 'white') {
+          powerBadge.style.borderColor = '#bbb';
+          powerBadge.style.color = '#111';
+          powerBadge.style.background = '#ffffff';
+        } else if (power.type === 'red') {
+          powerBadge.style.borderColor = '#e53935';
+          powerBadge.style.color = '#b71c1c';
+          powerBadge.style.background = '#ffeaea';
+        } else {
+          powerBadge.style.borderColor = '#0a84ff';
+          powerBadge.style.color = '#0a3d91';
+          powerBadge.style.background = '#e8f2ff';
+        }
+      }
+
       function update(dt) {
-        // dt em segundos
         if (!running || gameOver) return;
 
         time += dt;
 
-        // Aumenta velocidade gradualmente (limite para não ficar impossível)
-        const target = baseSpeed + Math.min(8, time * 0.35); // +0.35 px/frame por segundo até +8
-        speed += (target - speed) * 0.02; // easing leve
+        // Velocidade alvo cresce
+        const target = baseSpeed + Math.min(8, time * 0.35);
+        speed += (target - speed) * 0.02;
 
-        // Atualiza player
-        player.vy = Math.min(player.vy + gravity, maxFall);
-        player.y += player.vy;
-
-        if (player.y + player.h >= groundY) {
-          player.y = groundY - player.h;
+        // Player: voo ou gravidade
+        if (player.fly) {
+          const flightY = groundY - 140; // altura fixa para voar por cima
+          player.y += (flightY - player.y) * 0.2; // suaviza
           player.vy = 0;
-          player.onGround = true;
+          player.onGround = false;
+        } else {
+          player.vy = Math.min(player.vy + gravity, maxFall);
+          player.y += player.vy;
+          if (player.y + player.h >= groundY) {
+            player.y = groundY - player.h;
+            player.vy = 0;
+            player.onGround = true;
+          }
         }
 
         // Obstáculos
         for (const o of obstacles) {
           o.x -= speed;
           if (o.type === 'bird') {
-            // simples “bate-asa”
             o.flap = (o.flap + dt * 6) % (Math.PI * 2);
           }
         }
-        // Remove fora da tela
         for (let i = obstacles.length - 1; i >= 0; i--) {
           if (obstacles[i].x + obstacles[i].w < -20) obstacles.splice(i, 1);
         }
 
-        // Clouds
+        // Nuvens
         for (const c of clouds) c.x -= c.speed;
         for (let i = clouds.length - 1; i >= 0; i--) {
           if (clouds[i].x + clouds[i].w < -10) clouds.splice(i, 1);
+        }
+
+        // Powerups
+        for (const p of powerups) {
+          p.x -= speed * 0.95; // move quase à mesma velocidade que o chão
+        }
+        for (let i = powerups.length - 1; i >= 0; i--) {
+          if (powerups[i].x + powerups[i].r < -20) powerups.splice(i, 1);
         }
 
         // Spawn timers
         spawnCooldown -= dt;
         if (spawnCooldown <= 0) {
           spawnObstacle();
-          // Intervalo diminui conforme a velocidade, com aleatoriedade
           const base = Math.max(0.6, 1.4 - speed * 0.06);
           spawnCooldown = base + Math.random() * 0.5;
         }
@@ -275,12 +363,57 @@
           cloudCooldown = rand(1.8, 3.2);
         }
 
-        // Pontuação: baseada na distância
+        powerCooldown -= dt;
+        if (powerCooldown <= 0 && !gameOver) {
+          spawnPowerup();
+          powerCooldown = rand(6, 10); // novo poder em 6-10s
+        }
+
+        // Coleta de powerups
+        for (let i = powerups.length - 1; i >= 0; i--) {
+          const p = powerups[i];
+          if (circleRectOverlap(p.x, p.y, p.r, player)) {
+            activatePower(p.type);
+            powerups.splice(i, 1);
+          }
+        }
+
+        // Duração do poder
+        if (power.type) {
+          power.time -= dt;
+          if (power.time <= 0) {
+            clearPower();
+          } else {
+            updateBadge();
+          }
+        }
+
+        // Pontuação: distância
         score += speed * dt * 10;
         scoreEl.textContent = Math.floor(score).toString();
         speedEl.textContent = speed.toFixed(1);
 
-        // Colisão AABB simples
+        // Colisões com obstáculos
+        handleCollisions();
+      }
+
+      function handleCollisions() {
+        // Branco e Azul: atravessa/voa — sem colisão
+        if (power.type === 'white' || power.type === 'blue') return;
+
+        // Vermelho: quebra obstáculos ao encostar
+        if (power.type === 'red') {
+          for (let i = obstacles.length - 1; i >= 0; i--) {
+            if (rectsOverlap(player, obstacles[i])) {
+              // remove e dá um pequeno bônus
+              obstacles.splice(i, 1);
+              score += 5;
+            }
+          }
+          return;
+        }
+
+        // Sem poder: colisão = Game Over
         for (const o of obstacles) {
           if (rectsOverlap(player, o)) {
             endGame();
@@ -289,6 +422,7 @@
         }
       }
 
+      // Geometrias
       function rectsOverlap(a, b) {
         return (
           a.x < b.x + b.w &&
@@ -297,12 +431,19 @@
           a.y + a.h > b.y
         );
       }
+      function circleRectOverlap(cx, cy, r, rect) {
+        const closestX = clamp(cx, rect.x, rect.x + rect.w);
+        const closestY = clamp(cy, rect.y, rect.y + rect.h);
+        const dx = cx - closestX;
+        const dy = cy - closestY;
+        return (dx*dx + dy*dy) <= r*r;
+      }
 
+      // Desenho
       function draw() {
-        // fundo
         ctx.clearRect(0, 0, W, H);
 
-        // céu (linhas leves)
+        // céu
         ctx.strokeStyle = '#eee';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -321,7 +462,6 @@
         // chão
         ctx.fillStyle = '#ddd';
         ctx.fillRect(0, groundY + 1, W, H - groundY);
-        // listras do chão
         ctx.strokeStyle = '#cfcfcf';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -331,19 +471,19 @@
         }
         ctx.stroke();
 
+        // powerups
+        for (const p of powerups) drawPowerup(p);
+
         // obstáculos
         for (const o of obstacles) {
-          if (o.type === 'cactus') {
-            drawCactus(o.x, o.y, o.w, o.h);
-          } else {
-            drawBird(o);
-          }
+          if (o.type === 'cactus') drawCactus(o.x, o.y, o.w, o.h);
+          else drawBird(o);
         }
 
         // player
         drawPlayer();
 
-        // HUD in-canvas quando Game Over
+        // overlay Game Over
         if (gameOver) {
           ctx.fillStyle = 'rgba(255,255,255,0.9)';
           ctx.fillRect(W/2 - 190, H/2 - 60, 380, 120);
@@ -365,21 +505,45 @@
       }
 
       function drawPlayer() {
+        // Aparência depende do poder
+        if (power.type === 'white') {
+          ctx.globalAlpha = 0.35; // invisível
+        }
+
         // corpo
         ctx.fillStyle = player.color;
         ctx.fillRect(player.x, player.y, player.w, player.h);
 
-        // “pernas” alternando com o tempo
+        // pernas
         const t = Math.floor(time * 20) % 8;
         const leg = t < 4 ? 6 : 2;
         ctx.fillRect(player.x + 6, player.y + player.h, 8, leg);
         ctx.fillRect(player.x + player.w - 14, player.y + player.h, 8, 8 - leg);
 
-        // olho
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(player.x + player.w - 10, player.y + 10, 6, 6);
-        ctx.fillStyle = '#111';
-        ctx.fillRect(player.x + player.w - 8, player.y + 12, 3, 3);
+        // olho (esmaecer no branco)
+        if (power.type !== 'white') {
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(player.x + player.w - 10, player.y + 10, 6, 6);
+          ctx.fillStyle = '#111';
+          ctx.fillRect(player.x + player.w - 8, player.y + 12, 3, 3);
+        }
+
+        // Aura do vermelho
+        if (power.type === 'red') {
+          ctx.globalAlpha = 0.7;
+          ctx.strokeStyle = '#e53935';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(player.x - 3, player.y - 3, player.w + 6, player.h + 6);
+        }
+
+        // Trilho do azul
+        if (power.type === 'blue') {
+          ctx.globalAlpha = 0.25;
+          ctx.fillStyle = '#0a84ff';
+          ctx.fillRect(player.x - 20, player.y + 6, 18, player.h - 12);
+        }
+
+        ctx.globalAlpha = 1;
       }
 
       function drawCactus(x, y, w, h) {
@@ -389,17 +553,14 @@
         for (let i = 0; i < h; i += 6) {
           ctx.fillRect(x + 2, y + i, w - 4, 2);
         }
-        // braços
         ctx.fillStyle = '#2f7d32';
         ctx.fillRect(x - 6, y + 10, 6, 16);
         ctx.fillRect(x + w, y + 18, 6, 18);
       }
 
       function drawBird(o) {
-        // corpo
         ctx.fillStyle = '#444';
         ctx.fillRect(o.x, o.y, o.w, o.h);
-        // asas
         const flap = Math.sin(o.flap) > 0 ? 1 : -1;
         ctx.beginPath();
         ctx.moveTo(o.x + o.w / 2, o.y + o.h / 2);
@@ -407,7 +568,6 @@
         ctx.lineTo(o.x + o.w / 2 + 12, o.y + o.h / 2 - 10 * flap);
         ctx.closePath();
         ctx.fill();
-        // bico
         ctx.fillStyle = '#ff9800';
         ctx.fillRect(o.x + o.w - 4, o.y + 6, 6, 6);
       }
@@ -419,10 +579,58 @@
         ctx.fill();
       }
 
+      function drawPowerup(p) {
+        // círculo com brilho e ícone simples conforme tipo
+        ctx.save();
+        // contorno colorido
+        let color = '#ffffff';
+        if (p.type === 'red') color = '#e53935';
+        if (p.type === 'blue') color = '#0a84ff';
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r + 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.06)';
+        ctx.fill();
+
+        // núcleo
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        // símbolo
+        ctx.lineWidth = 2;
+        if (p.type === 'white') {
+          ctx.strokeStyle = '#777';
+          ctx.beginPath();
+          ctx.moveTo(p.x - 6, p.y);
+          ctx.lineTo(p.x + 6, p.y);
+          ctx.moveTo(p.x, p.y - 6);
+          ctx.lineTo(p.x, p.y + 6);
+          ctx.stroke();
+        } else if (p.type === 'red') {
+          ctx.strokeStyle = '#b71c1c';
+          ctx.beginPath();
+          ctx.moveTo(p.x - 6, p.y + 4);
+          ctx.lineTo(p.x - 1, p.y + 9);
+          ctx.lineTo(p.x + 7, p.y - 5);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = '#083c9a';
+          ctx.beginPath();
+          ctx.moveTo(p.x - 7, p.y + 2);
+          ctx.lineTo(p.x, p.y - 6);
+          ctx.lineTo(p.x + 7, p.y + 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
       function endGame() {
         gameOver = true;
         running = false;
-        baseSpeed = 6; // reset da base para próxima partida
+        baseSpeed = 6;
+        clearPower();
         if (Math.floor(score) > best) {
           best = Math.floor(score);
           localStorage.setItem('runner_best', String(best));
@@ -433,23 +641,27 @@
       function restart() {
         obstacles.length = 0;
         clouds.length = 0;
+        powerups.length = 0;
         player.y = groundY - player.h;
         player.vy = 0;
         player.onGround = true;
+        player.fly = false;
         score = 0;
         time = 0;
         speed = baseSpeed = 6;
         spawnCooldown = 0.2;
         cloudCooldown = 0.1;
+        powerCooldown = 1.5;
         gameOver = false;
         running = true;
+        clearPower();
         pauseBtn.textContent = 'Pausar';
         lastTs = performance.now();
         requestAnimationFrame(loop);
       }
 
       function loop(ts) {
-        const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0); // clamp: máx 50ms
+        const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0);
         lastTs = ts;
         update(dt);
         draw();
@@ -462,4 +674,3 @@
   </script>
 </body>
 </html>
-```
